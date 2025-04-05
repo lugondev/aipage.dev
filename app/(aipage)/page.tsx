@@ -1,450 +1,131 @@
-"use client";
-import { useChat } from "ai/react";
-import { useEffect, useRef, useState } from "react";
-import Frame from "react-frame-component";
-import Image from "next/image";
-import html2canvas from "html2canvas";
-import TweetButton from "@/components/tweetButton";
-import { useAuth } from "@/context/AuthContext";
-import useSearchParams from "@/hooks/useSearchParams";
-import RateModal from "@/components/RateModal";
-import { cn, updateProject } from "@/utils/helpers";
-import Link from "next/link";
+'use client'
 
-enum DeviceSize {
-  Mobile = "w-1/2",
-  Tablet = "w-3/4",
-  Desktop = "w-full",
-}
+import {useChat} from 'ai/react'
+import {useRef, useState} from 'react'
+import Frame from 'react-frame-component'
+import Image from 'next/image'
+import TweetButton from '@/components/tweetButton'
+import Link from 'next/link'
 
 export default function Chat() {
-  const { user, setUser } = useAuth();
-  const [lastMessageId, setLastMessageId] = useState<string | null>(null);
-  const [hasNoCreditsError, setHasNoCreditsError] = useState(false);
-  const { set } = useSearchParams();
+	const [iframeContent, setIframeContent] = useState('')
+	const [codeViewActive, setCodeViewActive] = useState(false)
+	const [error, setError] = useState<string | null>(null)
+	const maxLength = 500
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading, stop } =
-    useChat({
-      onResponse: (message) => {
-        setHasNoCreditsError(false);
-        setLastMessageId(null);
-        decreaseCredit();
-      },
-      onFinish: async (message) => {
-        try {
-          const res = JSON.parse(message.content) as { credits: number };
-          setCredits(res.credits);
-          setHasNoCreditsError(res.credits === 0);
-        } catch {
-          await saveResult(message.content);
-        }
-      },
-    });
+	const examplePrompts = ['Create a modern SaaS landing page', 'Design a restaurant website', 'Build a portfolio page']
 
-  function decreaseCredit(by: number = 1) {
-    if (user) {
-      setUser({ ...user, credits: user.credits - by });
-    }
-  }
+	const {messages, isLoading, input, handleInputChange, handleSubmit} = useChat({
+		onFinish: (message: {content: string}) => {
+			setIframeContent(message.content)
+			setError(null)
+		},
+		onError: (error: Error) => {
+			setError(error.message)
+		},
+	})
 
-  function setCredits(credits: number) {
-    if (user) {
-      setUser({ ...user, credits });
-    }
-  }
+	const iframeRef = useRef<HTMLIFrameElement>(null)
+	const toggleView = () => setCodeViewActive(!codeViewActive)
 
-  async function saveResult(result: string) {
-    const { _id } = await updateProject({
-      result,
-    });
-    setLastMessageId(_id);
-    set("rateModal", "true");
-  }
+	const handleSave = () => {
+		const fileName = 'landing-page.html'
+		const blob = new Blob([iframeContent], {type: 'text/html'})
+		const url = URL.createObjectURL(blob)
+		const a = document.createElement('a')
+		a.href = url
+		a.download = fileName
+		document.body.appendChild(a)
+		a.click()
+		document.body.removeChild(a)
+		URL.revokeObjectURL(url)
+	}
 
-  const [iframeContent, setIframeContent] = useState("");
-  const [imageSrc, setImageSrc] = useState<string>("");
+	const initialFrameContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="img-src https: data: blob:; default-src https: 'unsafe-inline' 'unsafe-eval'; font-src https: data:"></head><body><div id="root"></div></body></html>`
 
-  const [deviceSize, setDeviceSize] = useState(DeviceSize.Desktop);
-  const iframeRef = useRef(null);
-  const [fileName, setFileName] = useState("");
-  const [selectedElement, setSelectedElement] = useState<Element | null>(null);
-  const [editedContent, setEditedContent] = useState<string>("");
-  const [editingMode, setEditingMode] = useState(false);
-  const [codeViewActive, setCodeViewActive] = useState(false);
-  const [isStopped, setIsStopped] = useState(false);
+	return (
+		<div className='flex min-h-screen flex-col items-center justify-center p-4'>
+			<div className='mb-8 text-center'>
+				<Image src='/logoa.png' alt='AIPage.dev logo' width={200} height={200} className='mx-auto h-32 w-32' />
+				<h1 className='mb-4 text-4xl font-bold'>AIPage.dev</h1>
+				<p className='text-lg text-gray-600'>Generate landing pages with AI</p>
+			</div>
 
-  const appendToIframe = (content: any) => {
-    if (iframeRef.current) {
-      const iframeDocument = (iframeRef.current as HTMLIFrameElement)
-        .contentDocument;
-      if (iframeDocument) {
-        const newNode = iframeDocument.createElement("div");
-        newNode.innerHTML = content;
-        newNode.querySelectorAll<HTMLElement>("*").forEach((element) => {
-          element.addEventListener("mouseover", () => {
-            element.classList.add("outline-blue"); // Blue border
-          });
-          element.addEventListener("mouseout", () => {
-            element.style.outline = "none";
-          });
-          element.addEventListener("click", () => {
-            setSelectedElement(element);
-            setEditedContent(element.innerHTML);
-          });
-        });
-        requestAnimationFrame(() => {
-          iframeDocument.body.appendChild(newNode);
-        });
-      }
-    }
-  };
+			<div className='w-full max-w-md'>
+				<form onSubmit={handleSubmit} className='space-y-4'>
+					<div>
+						<div className='relative'>
+							<input
+								type='text'
+								value={input}
+								onChange={(e) => {
+									if (e.target.value.length <= maxLength) {
+										handleInputChange(e)
+									}
+								}}
+								placeholder='Describe your landing page...'
+								className='w-full rounded-lg border p-4 focus:outline-none focus:ring-2 focus:ring-blue-500'
+								disabled={isLoading}
+								maxLength={maxLength}
+							/>
+							{isLoading ? (
+								<div className='absolute right-3 top-4'>
+									<div className='animate-spin text-lg'>🔄</div>
+								</div>
+							) : (
+								<div className='absolute right-3 top-4 text-sm text-gray-400'>
+									{input.length}/{maxLength}
+								</div>
+							)}
+						</div>
+						<div className='mt-2 flex flex-wrap gap-2'>
+							{examplePrompts.map((prompt) => (
+								<button key={prompt} onClick={() => handleInputChange({target: {value: prompt}} as any)} className='rounded-md bg-gray-100 px-2 py-1 text-sm text-gray-500 transition-colors hover:bg-gray-200 hover:text-gray-700'>
+									{prompt}
+								</button>
+							))}
+						</div>
+					</div>
+					<button type='submit' className='w-full rounded-lg bg-blue-500 px-6 py-3 text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50' disabled={isLoading || !input.trim()}>
+						{isLoading ? 'Generating...' : 'Generate Landing Page'}
+					</button>
+				</form>
+				{error && <div className='mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-500'>{error}</div>}
+			</div>
 
-  const captureIframeContent = async () => {
-    if (iframeRef.current) {
-      const iframeDocument = (iframeRef.current as HTMLIFrameElement)
-        .contentDocument;
-      if (iframeDocument) {
-        const canvas = await html2canvas(iframeDocument.body);
-        const imgURL = canvas.toDataURL();
-        // You can use imgURL as the src for an image tag to display the image representation of the iframe content
-        // For simplicity, let's just set it to a state variable
-        setImageSrc(imgURL);
-      }
-    }
-  };
+			{(isLoading || iframeContent) && (
+				<div className='mt-8 w-full rounded-lg border'>
+					<div className='relative w-full'>
+						<div className='absolute right-2 top-2 flex space-x-2'>
+							<button onClick={handleSave} disabled={isLoading} className='rounded-lg bg-gray-100 p-2 text-sm hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2'>
+								<span className={isLoading ? 'animate-spin' : ''}>💾</span>
+								Save
+							</button>
+							<button onClick={toggleView} className='rounded-lg bg-gray-100 p-2 text-sm hover:bg-gray-200 flex items-center gap-2'>
+								{codeViewActive ? '🖼️' : '🖨️'}
+								{codeViewActive ? 'Preview' : 'Code'}
+							</button>
+						</div>
+						{isLoading ? (
+							<div className='w-full min-h-[600px] bg-gray-50 rounded-lg animate-pulse flex flex-col items-center justify-center'>
+								<div className='w-16 h-16 border-4 border-gray-200 border-t-blue-500 rounded-full animate-spin'></div>
+								<p className='mt-4 text-gray-500'>Crafting your landing page...</p>
+							</div>
+						) : (
+							<Frame ref={iframeRef} className='w-full min-h-[600px]' initialContent={initialFrameContent} sandbox='allow-same-origin allow-scripts allow-forms allow-popups'>
+								{codeViewActive ? <pre className='whitespace-pre-wrap p-4'>{iframeContent}</pre> : <div dangerouslySetInnerHTML={{__html: iframeContent}} />}
+							</Frame>
+						)}
+					</div>
+				</div>
+			)}
 
-  useEffect(() => {
-    const stream = new EventSource("/api/chat");
-    stream.onmessage = (event) => {
-      appendToIframe(event.data);
-    };
-
-    return () => stream.close();
-  }, []);
-
-  useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage && lastMessage.role !== "user") {
-      setIframeContent(lastMessage.content);
-    }
-  }, [messages]);
-
-  const handleSave = () => {
-    const element = document.createElement("a");
-    const file = new Blob([iframeContent], { type: "text/html" });
-    element.href = URL.createObjectURL(file);
-    element.download = fileName || "index.html";
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
-    const completionInput = iframeContent;
-  };
-
-  const listenersMap = useRef<
-    Map<HTMLElement, { mouseover: () => void; mouseout: () => void }>
-  >(new Map());
-
-  // Create a map to store the listeners for each element
-
-  const handleEdit = () => {
-    if (editingMode) {
-      // Save the updated iframe content
-      if (iframeRef.current) {
-        const iframeDocument = (iframeRef.current as HTMLIFrameElement)
-          .contentDocument;
-        if (iframeDocument) {
-          setIframeContent(iframeDocument.documentElement.innerHTML);
-        }
-      }
-
-      // Disable editing mode by setting the contentEditable property of all elements to false and remove the event listeners
-      if (iframeRef.current) {
-        const iframeDocument = (iframeRef.current as HTMLIFrameElement)
-          .contentDocument;
-        if (iframeDocument) {
-          iframeDocument
-            .querySelectorAll<HTMLElement>("*")
-            .forEach((element) => {
-              element.contentEditable = "false";
-
-              // Get the listeners for the element from the map
-              const listeners = listenersMap.current.get(element);
-              if (listeners) {
-                // Remove the listeners
-                element.removeEventListener("mouseover", listeners.mouseover);
-                element.removeEventListener("mouseout", listeners.mouseout);
-                // Remove the element from the map
-                listenersMap.current.delete(element);
-              }
-            });
-        }
-      }
-    } else {
-      // Enable editing mode by setting the contentEditable property of all elements to true and add event listeners
-      if (iframeRef.current) {
-        const iframeDocument = (iframeRef.current as HTMLIFrameElement)
-          .contentDocument;
-        if (iframeDocument) {
-          iframeDocument
-            .querySelectorAll<HTMLElement>("*")
-            .forEach((element) => {
-              element.contentEditable = "true";
-
-              // Create the event listeners
-              const mouseoverListener = () => {
-                element.classList.add("outline-blue");
-                console.log("Mouseover event fired");
-              };
-              const mouseoutListener = () => {
-                console.log("Mouseout event fired");
-                element.classList.remove("outline-blue");
-              };
-
-              // Add the listeners to the element
-              element.addEventListener("mouseover", mouseoverListener);
-              element.addEventListener("mouseout", mouseoutListener);
-
-              // Store the listeners in the map
-              listenersMap.current.set(element, {
-                mouseover: mouseoverListener,
-                mouseout: mouseoutListener,
-              });
-            });
-        }
-      }
-    }
-
-    setEditingMode(!editingMode);
-  };
-
-  const handleUpdate = () => {
-    if (selectedElement) {
-      selectedElement.innerHTML = editedContent;
-      setSelectedElement(null);
-      setEditedContent("");
-      if (iframeRef.current) {
-        const iframeDocument = (iframeRef.current as HTMLIFrameElement)
-          .contentDocument;
-        if (iframeDocument) {
-          setIframeContent(iframeDocument.documentElement.innerHTML);
-        }
-      }
-    }
-  };
-
-  function onFocusHandler() {
-    if (!user) {
-      set("authModal", "true");
-    }
-  }
-
-  const handleStop = async () => {
-    stop();
-    setIsStopped(true);
-    await saveResult(iframeContent);
-  };
-
-  return (
-    <>
-      <div className="flex flex-col w-full min-h-screen bg-gradient-to-b from-white via-white to-slate-300 mx-auto px-4 md:px-16 lg:px-24 overflow-hidden items-center pt-24 md:pt-36">
-        <section>
-          <div className="fixed bottom-16 right-6 cursor-pointer transition-colors group">
-            <div className="tooltip opacity-0 group-hover:opacity-100 bg-gray-700 text-white text-xs rounded py-1 px-2 absolute right-8 bottom-4 transform translate-y-2 w-64">
-              Help spread the word! 📢 Post a tweet of your creation on Twitter
-              and tag @aipagedev for early access to our exclusive beta—packed
-              with stunning features. 🚀
-            </div>
-            <TweetButton />
-          </div>
-        </section>
-
-        {/* Display the image if imageSrc is set */}
-
-        <section>
-          <div className="fixed bottom-6 right-6 cursor-pointer transition-colors group">
-            <div className="tooltip opacity-0 group-hover:opacity-100 bg-gray-700 text-white text-xs rounded py-1 px-2 absolute  right-8 bottom-4 transform translate-y-2 w-48">
-              Star us on Github to show your support
-            </div>
-            <a
-              href="https://github.com/zinedkaloc/aipage.dev"
-              target="_blank"
-              rel="noreferrer"
-              className="text-2xl"
-            >
-              ⭐️
-            </a>
-          </div>
-        </section>
-
-        {isLoading ? null : (
-          <div className="relative py-6 flex flex-col justify-center">
-            <Image
-              src="/logoa.png"
-              alt="AIPage.dev logo"
-              width={200}
-              height={200}
-              className="mx-auto h-32 w-32"
-            />
-            <div className="text-center sm:w-11/12 md:w-[800px]">
-              <h1 className="text-5xl font-bold text-ellipsis tracking-tight">
-                🚧 Under Renovation 🚧
-              </h1>
-
-              <p className="text-lg text-gray-700 mt-4 tracking-tight">
-                A refreshed experience is on the horizon. <br /> Follow us on
-                <Link href="https://x.com/aipagedev">
-                  <b> X</b>
-                </Link>{" "}
-                to stay updated!
-              </p>
-              <p className="text-xs pt-2 ml-4 font-medium text-gray-500 cursor-pointer animate-pulse"></p>
-            </div>
-          </div>
-        )}
-
-        {editingMode && selectedElement && (
-          <div className="absolute z-50">
-            <p>Edit the selected element:</p>
-            <input
-              value={editedContent}
-              onChange={(e) => setEditedContent(e.target.value)}
-            />
-            <button onClick={handleUpdate}>Update</button>
-          </div>
-        )}
-
-        {hasNoCreditsError ? (
-          <div className="flex flex-col items-center justify-center">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="100"
-              height="100"
-              viewBox="0 0 100 100"
-            >
-              <polygon points="50,15 85,85 15,85" fill="#FF6B6B" />
-              <text
-                x="50"
-                y="75"
-                fontSize="40"
-                fontWeight="bold"
-                textAnchor="middle"
-                fill="#FFFFFF"
-              >
-                !
-              </text>
-            </svg>
-            <h1 className="text-3xl text-gray-800 mb-2">No Credits</h1>
-            <p className="text-gray-600 mb-6">
-              You do not have enough credits to proceed with this request today.
-              Please try again tomorrow.
-            </p>
-          </div>
-        ) : (
-          iframeContent && (
-            <div className="flex flex-col items-center py-4 w-full">
-              <div className={cn(deviceSize)}>
-                <div className="border flex items-center bg-white rounded-t-xl justify-between p-3 border-b lg:px-12 sticky top-4 z-10">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                    <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                  </div>
-                  <div className="flex-1 text-center">
-                    <div className="flex items-center justify-between space-x-2 bg-gray-200 rounded-xl mx-8 py-1 px-2">
-                      <div className="flex items-center w-3 h-3"></div>
-                      <div className="flex items-center space-x-2">
-                        acme.co
-                        {isLoading && (
-                          <span className="ml-4 animate-spin">🟠</span>
-                        )}
-                        <button
-                          className="ml-4 hidden md:flex"
-                          onClick={() => setDeviceSize(DeviceSize.Mobile)}
-                        >
-                          📱
-                        </button>
-                        <button
-                          className=" hidden md:flex"
-                          onClick={() => setDeviceSize(DeviceSize.Tablet)}
-                        >
-                          💻
-                        </button>
-                        <button
-                          className=" hidden md:flex"
-                          onClick={() => setDeviceSize(DeviceSize.Desktop)}
-                        >
-                          🖥️
-                        </button>
-                        <button
-                          className=""
-                          onClick={() => setCodeViewActive(!codeViewActive)}
-                        >
-                          {codeViewActive ? "🖼️" : "🖨️"}
-                        </button>
-                      </div>
-                      {/* Clear and Stop buttons */}
-                      <div className="flex items-center space-x-4">
-                        <button
-                          className={`${
-                            isLoading ? "" : "opacity-70 cursor-not-allowed"
-                          }`}
-                          onClick={handleStop}
-                        >
-                          <span role="img" aria-label="stop">
-                            🟥
-                          </span>
-                        </button>
-                        <button
-                          className={`${
-                            isStopped ? "" : "opacity-70 cursor-not-allowed"
-                          }`}
-                          onClick={() => {
-                            setIframeContent("");
-                            setIsStopped(false);
-                          }}
-                        >
-                          <span role="img" aria-label="clear">
-                            🧽
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <div></div>
-                  <div className="flex justify-end space-x-4">
-                    <button onClick={handleSave}>
-                      <span role="img" aria-label="paper-plane">
-                        📩
-                      </span>
-                    </button>
-                    {!isLoading && iframeContent && (
-                      <button onClick={handleEdit} className="ml-4">
-                        {editingMode ? "💾" : "✏️"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="border bg-white rounded-b-xl border-t-0 h-[calc(100vh-100px)] overflow-auto">
-                  <Frame
-                    ref={iframeRef}
-                    sandbox="allow-same-origin allow-scripts"
-                    className="w-full h-full"
-                  >
-                    {codeViewActive ? (
-                      <pre>{iframeContent}</pre>
-                    ) : (
-                      <div
-                        dangerouslySetInnerHTML={{ __html: iframeContent }}
-                      />
-                    )}
-                  </Frame>
-                </div>
-              </div>
-            </div>
-          )
-        )}
-      </div>
-      <RateModal key={lastMessageId} show={!!lastMessageId} />
-    </>
-  );
+			<div className='fixed bottom-4 right-4 flex items-center space-x-4'>
+				<Link href='https://github.com/zinedkaloc/aipage.dev' target='_blank' rel='noreferrer' className='text-2xl'>
+					⭐️
+				</Link>
+				<TweetButton />
+			</div>
+		</div>
+	)
 }
